@@ -9,9 +9,7 @@
 static int link_help(struct rd *rd)
 {
 	pr_out("Usage: %s link show [DEV/PORT_INDEX]\n", rd->filename);
-	pr_out("Usage: %s link add NAME type TYPE netdev NETDEV\n",
-	       rd->filename);
-	pr_out("Usage: %s link add NAME type TYPE rdmadev NETDEV uuid UUID\n",
+	pr_out("Usage: %s link add NAME type TYPE netdev NETDEV [rdmadev NETDEV uuid UUID]\n",
 	       rd->filename);
 	pr_out("Usage: %s link delete NAME\n", rd->filename);
 	return 0;
@@ -297,22 +295,20 @@ static int link_show(struct rd *rd)
 	return rd_exec_link(rd, link_one_show, true);
 }
 
-static int link_add_netdev(struct rd *rd)
+static int link_netdev_send(struct rd *rd)
 {
-	char *link_netdev;
 	uint32_t seq;
 
-	if (rd_no_arg(rd)) {
-		pr_err("Please provide a net device name.\n");
+	if (!rd_no_arg(rd)) {
+		pr_err("Unknown argument.\n");
 		return -EINVAL;
 	}
 
-	link_netdev = rd_argv(rd);
 	rd_prepare_msg(rd, RDMA_NLDEV_CMD_NEWLINK, &seq,
 		       (NLM_F_REQUEST | NLM_F_ACK));
 	mnl_attr_put_strz(rd->nlh, RDMA_NLDEV_ATTR_DEV_NAME, rd->link_name);
 	mnl_attr_put_strz(rd->nlh, RDMA_NLDEV_ATTR_LINK_TYPE, rd->link_type);
-	mnl_attr_put_strz(rd->nlh, RDMA_NLDEV_ATTR_NDEV_NAME, link_netdev);
+	mnl_attr_put_strz(rd->nlh, RDMA_NLDEV_ATTR_NDEV_NAME, rd->link_netdev);
 	return rd_sendrecv_msg(rd, seq);
 }
 
@@ -328,30 +324,50 @@ static int link_add_uuid(struct rd *rd)
 
 	link_netuuid = rd_argv(rd);
 	rd_prepare_msg(rd, RDMA_NLDEV_CMD_NEWLINK, &seq,
-                 (NLM_F_REQUEST | NLM_F_ACK));
+		       (NLM_F_REQUEST | NLM_F_ACK));
 	mnl_attr_put_strz(rd->nlh, RDMA_NLDEV_ATTR_DEV_NAME, rd->link_name);
 	mnl_attr_put_strz(rd->nlh, RDMA_NLDEV_ATTR_LINK_TYPE, rd->link_type);
-	mnl_attr_put_strz(rd->nlh, RDMA_NLDEV_ATTR_RDMADEV_NAME, rd->link_rdmadev);
+	mnl_attr_put_strz(rd->nlh, RDMA_NLDEV_ATTR_NDEV_NAME, rd->link_netdev);
+	mnl_attr_put_strz(rd->nlh, RDMA_NLDEV_ATTR_RDMADEV_NAME,
+			  rd->link_rdmadev);
 	mnl_attr_put_strz(rd->nlh, RDMA_NLDEV_ATTR_NET_UUID, link_netuuid);
 	return rd_sendrecv_msg(rd, seq);
 }
 
 static int link_add_rdmadev(struct rd *rd)
 {
-	const struct rd_cmd cmds[] = {
-		{ NULL,		link_help},
-		{ "uuid",	link_add_uuid},
-		{ 0 }
-	};
+  const struct rd_cmd cmds[] = {
+    { NULL, link_help },
+    { "uuid", link_add_uuid },
+    { 0 },
+  };
 
-	if (rd_no_arg(rd)) {
+  if (rd_no_arg(rd)) {
 		pr_err("Please provide an RDMA device name.\n");
 		return -EINVAL;
 	}
 
 	rd->link_rdmadev = rd_argv(rd);
 	rd_arg_inc(rd);
-  return rd_exec_cmd(rd, cmds, "parameter");
+	return rd_exec_cmd(rd, cmds, "parameter");
+}
+
+static int link_add_netdev(struct rd *rd)
+{
+  const struct rd_cmd cmds[] = {
+    { NULL, link_netdev_send },
+    { "rdmadev", link_add_rdmadev },
+    { 0 },
+  };
+
+	if (rd_no_arg(rd)) {
+		pr_err("Please provide a net device name.\n");
+		return -EINVAL;
+	}
+
+	rd->link_netdev = rd_argv(rd);
+	rd_arg_inc(rd);
+	return rd_exec_cmd(rd, cmds, "parameter");
 }
 
 static int link_add_type(struct rd *rd)
@@ -359,7 +375,6 @@ static int link_add_type(struct rd *rd)
 	const struct rd_cmd cmds[] = {
 		{ NULL,		link_help},
 		{ "netdev",	link_add_netdev},
-    { "rdmadev", link_add_rdmadev},
 		{ 0 }
 	};
 
